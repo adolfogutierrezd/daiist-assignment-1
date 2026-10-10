@@ -32,17 +32,22 @@ torch.manual_seed(SEED)
 
 # Business costs from REPORT.md (euros per customer)
 OFFER_COST = 150      # cost of the retention offer
-CHURN_LOSS = 900      # revenue lost when a customer leaves (~12 months x ~75)
+MONTHS_LOST = 12      # a churner = 12 months of THEIR OWN bill lost
 OFFER_SUCCESS = 0.5   # share of contacted churners the offer keeps
 
 
-def business_cost(y_true, y_pred):
-    """Total euros lost for a set of yes/no 'contact this customer' decisions."""
-    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred)
-    tp = np.sum((y_pred == 1) & (y_true == 1))
-    fp = np.sum((y_pred == 1) & (y_true == 0))
-    fn = np.sum((y_pred == 0) & (y_true == 1))
-    return float(fp * OFFER_COST + tp * (OFFER_COST + (1 - OFFER_SUCCESS) * CHURN_LOSS) + fn * CHURN_LOSS)
+def business_cost(y_true, y_pred, monthly_bill):
+    """Total euros lost for a set of yes/no 'contact this customer' decisions.
+
+    Contacted customers always cost the offer; churners we don't keep cost
+    12 months of their own monthly bill (so losing a €110/month customer
+    hurts more than losing a €20/month one).
+    """
+    y_true, y_pred = np.asarray(y_true), np.asarray(y_pred).astype(int)
+    loss = MONTHS_LOST * np.asarray(monthly_bill)
+    contacted = y_pred * (OFFER_COST + y_true * (1 - OFFER_SUCCESS) * loss)
+    not_contacted = (1 - y_pred) * y_true * loss
+    return float(np.sum(contacted + not_contacted))
 
 
 # ---------------------------------------------------------------------------
@@ -86,10 +91,10 @@ avg_past_bill = np.where(df["tenure"] > 0, df["TotalCharges"] / df["tenure"].cli
 df["bill_increase"] = df["MonthlyCharges"] - avg_past_bill
 df = df.drop(columns="TotalCharges")
 
-# MonthlyCharges is itself dropped: the services explain 99.9% of it (R^2 =
+# MonthlyCharges is itself removed as a feature: the services explain 99.9% of it (R^2 =
 # 0.9988, it's basically a price list), so keeping both gives the model two
 # ways to say the same thing and the coefficients become unstable.
-df = df.drop(columns="MonthlyCharges")
+monthly_bill = df.pop("MonthlyCharges")  # kept aside: used by the business cost, not as a feature
 
 # New feature 3: churn risk falls fast in the first months then flattens,
 # so log(tenure) fits a linear model better than raw tenure.
@@ -109,6 +114,7 @@ print(f"{len(feature_names)} features: {feature_names}")
 X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.4, stratify=y, random_state=SEED)
 X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=SEED)
 print(f"train {len(X_train)}  val {len(X_val)}  test {len(X_test)}")
+bill_val, bill_test = monthly_bill.loc[X_val.index].values, monthly_bill.loc[X_test.index].values
 
 # Fit the scaler on train only so val/test stay unseen. Scaling matters for
 # gradient descent: without it the big-valued columns dominate the updates.
@@ -232,7 +238,7 @@ val_p, test_p = all_probas(Xva), all_probas(Xte)
 # Threshold that minimises business cost on VALIDATION (sklearn model;
 # the other two give the same probabilities, checked below)
 thresholds = np.round(np.arange(0.05, 0.96, 0.01), 2)
-val_costs = [business_cost(y_val, val_p["sklearn"] >= t) for t in thresholds]
+val_costs = [business_cost(y_val, val_p["sklearn"] >= t, bill_val) for t in thresholds]
 best_threshold = float(thresholds[int(np.argmin(val_costs))])
 print(f"best threshold on validation: {best_threshold}")
 
@@ -246,7 +252,7 @@ for name, p in test_p.items():
         "roc_auc": round(roc_auc_score(y_test, p), 4),
         "log_loss": round(log_loss(y_test, p), 4),
         "accuracy@0.5": round(accuracy_score(y_test, p >= 0.5), 4),
-        f"cost@{best_threshold} (€)": business_cost(y_test, p >= best_threshold),
+        f"cost@{best_threshold} (€)": business_cost(y_test, p >= best_threshold, bill_test),
     })
 results = pd.DataFrame(rows)
 print("\nTest results:\n", results.to_string(index=False))
@@ -277,13 +283,13 @@ torch.save(std_model.state_dict(), ART / "standard_pytorch.pt")
 test_df = pd.DataFrame(Xte, columns=feature_names)
 test_df["Churn"] = y_test
 test_df.to_csv(ART / "test_set_scaled.csv", index=False)       # model inputs
-X_test.assign(Churn=y_test).to_csv(ART / "test_set_raw.csv", index=False)  # for readable plots
+X_test.assign(MonthlyCharges=bill_test, Churn=y_test).to_csv(ART / "test_set_raw.csv", index=False)  # for readable plots
 results.to_csv(ART / "results.csv", index=False)
 coefs.to_csv(ART / "coefficients.csv", index=False)
 json.dump({
     "best_C": best_C, "lambda": LAMBDA, "manual_lr": manual_lr, "standard_lr": standard_lr,
     "epochs": EPOCHS, "best_threshold": best_threshold, "n_features": n_features,
     "max_coef_diff": max_coef_diff, "max_prob_diff": max_prob_diff,
-    "offer_cost": OFFER_COST, "churn_loss": CHURN_LOSS, "offer_success": OFFER_SUCCESS,
+    "offer_cost": OFFER_COST, "months_lost": MONTHS_LOST, "offer_success": OFFER_SUCCESS,
 }, open(ART / "config.json", "w"), indent=2)
 print(f"\nSaved models and data to {ART}/")

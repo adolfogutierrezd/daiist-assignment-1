@@ -38,8 +38,16 @@ we spend the retention budget on?"*
 |---|---|---|
 | True negative | Not contacted, stays | €0 |
 | False positive | Contacted but would have stayed → offer wasted | €150 |
-| False negative | Not contacted, leaves → lose ~12 months × ~€75 bill | €900 |
-| True positive | Contacted and was going to leave → offer works 50% of the time | €150 + 50% × €900 = €600 |
+| False negative | Not contacted, leaves → we lose 12 months of **their own** bill | 12 × bill |
+| True positive | Contacted and was going to leave → offer works 50% of the time | €150 + 50% × 12 × bill |
+
+**Why 12 × each customer's own bill and not a flat amount.** Losing a
+customer who pays €110/month hurts much more than losing one who pays €20,
+so a flat loss would tell the team to chase cheap customers just as hard as
+valuable ones. My first version used a flat €900; the average churner pays
+€74.4/month, so 12 × €74.4 = €893. The flat number was a fair average, but
+making it per-customer is more honest about where the money is. The bill is
+kept aside for the cost only; it is not a model feature (see below).
 
 **What this framing decides in the pipeline:**
 
@@ -54,8 +62,12 @@ we spend the retention budget on?"*
    churns" is already 73.5% accurate and saves no money. The threshold is
    chosen to **minimise total business cost on the validation set**, and the
    test set is only used once at the end. In theory, contacting a customer
-   pays off when `p × (50% × €900) > €150`, i.e. **p > 0.33**, so I expect
-   the best threshold to be well below the default 0.5.
+   pays off when the revenue the offer is expected to save is larger than
+   the offer: `p × 50% × 12 × bill > €150`, i.e. **p > 25 / bill**. For a
+   typical €75/month customer that is **p > 0.33**, so I expect the best
+   threshold to be well below the default 0.5. It also means a customer
+   paying under €25/month (19.7% of customers) is **never** worth a €150
+   offer, however likely they are to leave.
 4. **Metric to compare models** — ROC AUC (ranking quality, independent of
    threshold) and log loss (what logistic regression actually minimises, so
    it's the fairest check that the three implementations agree).
@@ -112,12 +124,20 @@ All of it lives in `train.py`, section 2.
 | Naive: one-hot everything, raw numbers | 30 | 0.4013 | 0.860 |
 | Final features but raw `tenure` | 23 | 0.4014 | 0.859 |
 | Final features without `no_support` and `bill_increase` | 21 | 0.3961 | 0.863 |
+| Final + `month-to-month × fiber` interaction (tested, not kept) | 24 | 0.3954 | 0.864 |
 | **Final** | **23** | **0.3954** | **0.864** |
 
 Honest reading: **`log_tenure` is the change that matters**. The two new
 behavioural features help only a little. The biggest win of the cleaning is
 not the score but a **smaller, non-redundant, interpretable model** whose
 coefficients are stable (largest coefficient 0.78 instead of 1.58).
+
+**A feature I tested and rejected.** Month-to-month contracts and fiber
+internet are the two strongest risk signals, and customers with both churn
+at 55% (30% of all customers). I expected an interaction flag for that
+group to help, but validation log loss stayed at 0.3954: the model already
+gets this group right by adding the two separate effects, so the extra
+column only adds complexity. I left it out.
 
 ## Modeling: three implementations, one model
 
@@ -148,14 +168,14 @@ would be solving slightly different problems.
   both (0.01 had not converged: val log loss 0.4000 manual / 0.4005 standard,
   vs 0.3954 for both at lr = 0.1).
 
-**Test-set results** (threshold 0.37, picked on validation; cost = € on 1,409 customers):
+**Test-set results** (threshold 0.38, picked on validation; cost = € on 1,409 customers):
 
-| Model | ROC AUC | Log loss | Accuracy @0.5 | Business cost @0.37 |
+| Model | ROC AUC | Log loss | Accuracy @0.5 | Business cost @0.38 |
 |---|---|---|---|---|
-| scikit-learn | 0.8402 | 0.4206 | 0.797 | €290,550 |
-| Manual PyTorch | 0.8403 | 0.4207 | 0.798 | €290,400 |
-| Standard PyTorch | 0.8402 | 0.4206 | 0.797 | €290,550 |
-| Naive baseline (everyone = 26.5%) | 0.5000 | 0.5787 | 0.735 | €336,600 (contacts nobody) |
+| scikit-learn | 0.8402 | 0.4206 | 0.797 | €288,323 |
+| Manual PyTorch | 0.8403 | 0.4207 | 0.798 | €288,323 |
+| Standard PyTorch | 0.8402 | 0.4206 | 0.797 | €288,323 |
+| Naive baseline (everyone = 26.5%) | 0.5000 | 0.5787 | 0.735 | €337,971 (contacts nobody) |
 
 **Do the three agree? Yes.** The largest coefficient difference from
 sklearn is **0.004** and the largest probability difference on any test
@@ -173,25 +193,28 @@ gradient descent moves along it very slowly and stops elsewhere. Removing
 the two redundant features made the solution unique and the coefficients
 matched, with no loss in accuracy.
 
-**Business result.** Using the model at threshold 0.37 costs **€290,550**
-vs **€336,600** for doing nothing: a saving of **€46,050 (−13.7%)** on 1,409
-customers. It contacts 455 customers and catches 254 of the 374 churners.
-The default 0.5 threshold would cost €294,900, and contacting everyone
-€379,650. The best threshold found on validation (0.37) is close to the
-theoretical break-even from the cost table (0.33), which is a good sign
-that the probabilities are well calibrated.
+**Business result.** Using the model at threshold 0.38 costs **€288,323**
+vs **€337,971** for doing nothing: a saving of **€49,648 (−14.7%)** on 1,409
+customers. It contacts 444 customers and catches 248 of the 374 churners.
+The default 0.5 threshold would cost €292,421, and contacting everyone
+€380,336. The best threshold found on validation (0.38) is close to the
+theoretical break-even for a typical €75/month customer (0.33), which is a
+good sign that the probabilities are reasonably well calibrated.
 
 ## Limitations & next steps
 
-- **The costs are my assumptions** (€150 offer, €900 lost customer, 50%
+- **The costs are my assumptions** (€150 offer, 12 months of bill lost, 50%
   offer success). The threshold and the € figures depend directly on them.
   *Fix:* get the real offer cost and acceptance rate from a small A/B test
   of the retention campaign, then re-run `train.py`; the threshold is
   recomputed automatically.
-- **Same loss for every churner.** A churner paying €110/month is worth more
-  than one paying €20, but the cost uses a flat €900. *Fix:* use
-  `12 × MonthlyCharges` per customer as the loss, so the model focuses the
-  budget on valuable customers.
+- **One threshold for everyone.** The cost already uses each customer's own
+  bill, but the decision still uses a single probability threshold, which
+  the brief's slider requires. Since the break-even is `p > 25 / bill`, the
+  right cut-off is different for each customer. On the test set, contacting
+  whoever has `p × 6 × bill > €150` would cost **€280,704**, another €7.6k
+  less than the best single threshold. *Fix:* rank customers by expected
+  saving (`p × 6 × bill − 150`) instead of by probability alone.
 - **One snapshot, no dates.** I can't check whether the model still works
   next month, and a random split may be optimistic. *Fix:* with monthly
   snapshots, train on months 1…k and test on month k+1 (time-based split).
@@ -199,10 +222,11 @@ that the probabilities are well calibrated.
   With only 1,409 customers per set, part of this is noise. *Fix:* use
   5-fold cross-validation to choose C and the threshold so they don't
   depend on one particular validation split.
-- **Linear model limits.** It can't learn interactions such as
-  "month-to-month contract *and* fiber optic" unless I build them by hand.
-  *Fix:* add a few interaction features justified by the business
-  (contract × internet type) and compare on validation.
+- **Linear model limits.** It can't learn interactions unless I build them
+  by hand. I tried the most obvious one (month-to-month × fiber) and it
+  didn't help, which suggests the remaining error isn't about that pair.
+  *Fix:* look at the customers the model gets most wrong (high-probability
+  stayers, low-probability churners) to find what they have in common.
 - **My behavioural features were weak.** `bill_increase` has a coefficient
   close to 0 (−0.012), and removing it alone only moves val log loss from
   0.3954 to 0.3956. Its signal is likely already carried by tenure and

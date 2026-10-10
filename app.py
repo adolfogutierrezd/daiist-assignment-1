@@ -29,6 +29,7 @@ coefs = pd.read_csv(ART / "coefficients.csv")
 test = pd.read_csv(ART / "test_set_scaled.csv")
 X_test = test.drop(columns="Churn").values.astype("float32")
 y_test = test["Churn"].values
+bill_test = pd.read_csv(ART / "test_set_raw.csv")["MonthlyCharges"].values  # for the € cost
 raw = pd.read_csv("data/telco_churn.csv")  # original data, for distributions
 
 # Model 1: scikit-learn
@@ -62,14 +63,16 @@ with torch.no_grad():
     }
 MODELS = list(probs)
 
-OFFER_COST, CHURN_LOSS, OFFER_SUCCESS = config["offer_cost"], config["churn_loss"], config["offer_success"]
+OFFER_COST, MONTHS_LOST, OFFER_SUCCESS = config["offer_cost"], config["months_lost"], config["offer_success"]
 
 
 def business_cost(y_true, y_pred):
-    tp = np.sum((y_pred == 1) & (y_true == 1))
-    fp = np.sum((y_pred == 1) & (y_true == 0))
-    fn = np.sum((y_pred == 0) & (y_true == 1))
-    return fp * OFFER_COST + tp * (OFFER_COST + (1 - OFFER_SUCCESS) * CHURN_LOSS) + fn * CHURN_LOSS
+    """Same formula as train.py: offer cost + 12 months of each lost customer's bill."""
+    y_pred = np.asarray(y_pred).astype(int)
+    loss = MONTHS_LOST * bill_test
+    contacted = y_pred * (OFFER_COST + y_true * (1 - OFFER_SUCCESS) * loss)
+    not_contacted = (1 - y_pred) * y_true * loss
+    return float(np.sum(contacted + not_contacted))
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +135,7 @@ def threshold_view(threshold, model):
         f"- Contact nobody (naive baseline): €{nobody:,.0f} → model saves **€{nobody - cost:,.0f}**\n"
         f"- Contact everyone: €{everyone:,.0f}\n"
         f"- Threshold chosen on validation in train.py: **{config['best_threshold']}**\n\n"
-        f"*Costs: offer €{OFFER_COST}, lost customer €{CHURN_LOSS}, "
+        f"*Costs: offer €{OFFER_COST}, lost customer = {MONTHS_LOST} × their monthly bill, "
         f"offer keeps {OFFER_SUCCESS:.0%} of contacted churners.*"
     )
 
