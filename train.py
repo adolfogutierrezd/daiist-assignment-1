@@ -87,7 +87,7 @@ df["bill_increase"] = df["MonthlyCharges"] - avg_past_bill
 df = df.drop(columns="TotalCharges")
 
 # MonthlyCharges is itself dropped: the services explain 99.9% of it (R^2 =
-# 0.9989, it's basically a price list), so keeping both gives the model two
+# 0.9988, it's basically a price list), so keeping both gives the model two
 # ways to say the same thing and the coefficients become unstable.
 df = df.drop(columns="MonthlyCharges")
 

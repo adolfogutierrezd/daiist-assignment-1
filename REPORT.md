@@ -100,7 +100,7 @@ All of it lives in `train.py`, section 2.
   gains nothing from a sum of its own inputs, and the coefficients stop
   being unique (see the Modeling section).
 - **`MonthlyCharges`**. A linear regression of `MonthlyCharges` on the service
-  flags has **R² = 0.9989**: the bill is basically a price list (phone ≈ €20,
+  flags has **R² = 0.9988** (on all 7,043 customers): the bill is basically a price list (phone ≈ €20,
   fiber ≈ +€25, each streaming service ≈ €10, each add-on ≈ €5). Keeping it
   next to the services gives the model two ways to say the same thing. It
   is still used indirectly, inside `bill_increase`.
@@ -141,10 +141,12 @@ weights only, not the bias, in `torch.optim`). Without this step the three
 would be solving slightly different problems.
 
 **Tuning (sparingly, on validation log loss):**
-- `C ∈ {0.01, 0.1, 1, 10}` → **C = 10** (0.3954 vs 0.3955 at C = 1, so
-  regularisation barely matters with 23 features and 4,225 rows).
+- `C ∈ {0.01, 0.1, 1, 10}` → **C = 10**, but C = 1 and C = 10 both give a
+  val log loss of 0.3954 (only C = 0.01 is clearly worse, 0.4014), so
+  regularisation barely matters with 23 features and 4,225 rows.
 - learning rate `∈ {0.01, 0.1, 1}`, 3,000 full-batch epochs → **lr = 0.1** for
-  both (0.01 had not converged: val log loss 0.4001).
+  both (0.01 had not converged: val log loss 0.4000 manual / 0.4005 standard,
+  vs 0.3954 for both at lr = 0.1).
 
 **Test-set results** (threshold 0.37, picked on validation; cost = € on 1,409 customers):
 
@@ -202,9 +204,9 @@ that the probabilities are well calibrated.
   *Fix:* add a few interaction features justified by the business
   (contract × internet type) and compare on validation.
 - **My behavioural features were weak.** `bill_increase` has a coefficient
-  close to 0. Its signal is likely already carried by tenure and contract.
-  I kept it because removing it didn't help either, but I would drop it in
-  a production version to keep the model simpler.
+  close to 0 (−0.012), and removing it alone only moves val log loss from
+  0.3954 to 0.3956. Its signal is likely already carried by tenure and
+  contract. I would drop it in a production version to keep the model simpler.
 
 ## Generative AI use disclosure
 
