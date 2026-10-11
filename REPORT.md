@@ -52,9 +52,9 @@ using each person's bill is more realistic.
    exactly what I want to predict, so I didn't need to change it.
 2. **How I split the data:** the dataset is one snapshot with **no dates**,
    so a random split can't leak "future" information into training. I used
-   **60% train, 20% validation, 20% test**. Also I stratified the data per traning, validation and test, 
+   **60% train, 20% validation, 20% test**. Also I stratified the data per training, validation and test, 
    so that each part keeps the same 26.5% of churners. 
-   If I had monthly data I would split by time instead (this is a actually a limitation).
+   If I had monthly data I would split by time instead (this is actually a limitation).
 3. **How I chose the threshold:** not with accuracy. A model that says
    "nobody leaves" is already 73.5% accurate but saves no money. Instead I
    pick the threshold that gives the **lowest total cost on the validation
@@ -121,6 +121,14 @@ model already catches this group by adding up the two separate effects, so
 I didn't keep it.
 
 **Did all this help? (validation set, same model)**
+
+| Version | Columns | Val log loss | Val ROC AUC |
+|---|---|---|---|
+| Naive: one-hot everything, raw numbers | 30 | 0.4013 | 0.860 |
+| My features but normal `tenure` instead of log | 23 | 0.4014 | 0.859 |
+| My features without `no_support` and `bill_increase` | 21 | 0.3961 | 0.863 |
+| My features + month-to-month × fiber (not kept) | 24 | 0.3954 | 0.864 |
+| **Final** | **23** | **0.3954** | **0.864** |
 
 To be honest: **`log_tenure` is the change that really matters**. My two new
 features only help a little. The biggest benefit of the cleaning isn't the
