@@ -20,8 +20,7 @@ and saved it in the repo as `data/telco_churn.csv` (948 KB).
 - **1,869 customers left (26.5%)** and 5,174 stayed (73.5%).
 
 I chose it because churn is a real problem that companies deal with every
-month, the target is Yes/No so logistic regression fits, and the data needs
-some real cleaning and thinking before it can be used.
+month and the data needs some real cleaning and thinking before it can be used.
 
 ## Business / real-life framing
 
@@ -44,7 +43,7 @@ retention budget on?*
 I use **each customer's own bill** instead of one fixed amount, because
 losing someone who pays €110 a month is much worse than losing someone who
 pays €20. At first I used a fixed €900. The average customer who leaves
-pays €74.4 a month, and 12 × €74.4 = €893, so €900 was a fair average, but
+pays €74.4 a month, and 12 × €74.4 = €893, so €900 was a fair average to choose from, but
 using each person's bill is more realistic.
 
 **How this framing changed my pipeline:**
@@ -53,9 +52,9 @@ using each person's bill is more realistic.
    exactly what I want to predict, so I didn't need to change it.
 2. **How I split the data:** the dataset is one snapshot with **no dates**,
    so a random split can't leak "future" information into training. I used
-   **60% train, 20% validation, 20% test**, stratified so that each part
-   keeps the same 26.5% of churners. If I had monthly data I would split by
-   time instead.
+   **60% train, 20% validation, 20% test**. Also I stratified the data per traning, validation and test, 
+   so that each part keeps the same 26.5% of churners. 
+   If I had monthly data I would split by time instead (this is a actually a limitation).
 3. **How I chose the threshold:** not with accuracy. A model that says
    "nobody leaves" is already 73.5% accurate but saves no money. Instead I
    pick the threshold that gives the **lowest total cost on the validation
@@ -64,9 +63,9 @@ using each person's bill is more realistic.
    is expected to save is bigger than the offer itself:
    `p × 50% × 12 × bill > €150`, which simplifies to **p > 25 / bill**.
    For a typical €75/month customer that means **p > 0.33**, so I expected
-   the best threshold to be well below the usual 0.5. It also means that
+   the best threshold to be below the usual 0.5. It also means that
    customers paying less than €25 a month (19.7% of all customers) are
-   **never** worth a €150 offer, no matter how likely they are to leave.
+   not worth a €150 offer, no matter how likely they are to leave.
 4. **How I compare models:** ROC AUC (how well the model ranks customers
    from risky to safe) and log loss (the thing logistic regression actually
    minimises, so it's the fairest way to check the three versions match).
@@ -80,7 +79,7 @@ All of this is in `train.py`, section 2.
 - `TotalCharges` was stored as text and **11 rows were empty**. When I
   looked at them, all 11 had `tenure = 0`, meaning they were brand-new
   customers who hadn't been charged yet. So the right value is **0**, not a
-  missing value to drop or fill with the average.
+  missing value to drop.
 - I removed `customerID` because it's just a label and says nothing about
   whether someone leaves.
 
@@ -92,9 +91,7 @@ All of this is in `train.py`, section 2.
 - `InternetService`, `Contract` and `PaymentMethod` are one-hot encoded,
   dropping one category each so there are no repeated columns.
 - I **scaled** the numbers with `StandardScaler`, fitted **only on the
-  training data** so no information from validation/test leaks in. Scaling
-  is also important for the PyTorch versions: without it, columns with big
-  numbers dominate the gradient and training is much slower.
+  training data** so no information from validation/test leaks in.
 
 **New features I created**
 
@@ -124,14 +121,6 @@ model already catches this group by adding up the two separate effects, so
 I didn't keep it.
 
 **Did all this help? (validation set, same model)**
-
-| Version | Columns | Val log loss | Val ROC AUC |
-|---|---|---|---|
-| Naive: one-hot everything, raw numbers | 30 | 0.4013 | 0.860 |
-| My features but normal `tenure` instead of log | 23 | 0.4014 | 0.859 |
-| My features without `no_support` and `bill_increase` | 21 | 0.3961 | 0.863 |
-| My features + month-to-month × fiber (not kept) | 24 | 0.3954 | 0.864 |
-| **Final** | **23** | **0.3954** | **0.864** |
 
 To be honest: **`log_tenure` is the change that really matters**. My two new
 features only help a little. The biggest benefit of the cleaning isn't the
@@ -236,8 +225,8 @@ I used **Claude (Anthropic), through Claude Code**, as an assistant during
 this assignment. It helped me read and organise the assignment brief,
 download the dataset, write the code in `train.py` and `app.py` (loading
 the data, the training loops, saving the models and the Plotly/Gradio
-dashboard), run and check the results, and write and format this report.
+dashboard), run and check the results. As well, it helped on the visualisation
+of this REPORT.
 
 I went through every decision: the business framing and cost assumptions,
-the split, each feature I created or removed, and why the three models
-first disagreed. I can explain all of them without the code in front of me.
+the split and why the three models first disagreed. 
